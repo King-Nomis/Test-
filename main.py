@@ -239,97 +239,6 @@ class HTMLQuizProcessor:
             document.getElementById('mobileNotVis').textContent = vis.filter(v => !v).length;
             document.getElementById('mobileRev').textContent = rev.filter(Boolean).length;
         }
-        
-        // Initialize mobile palette in initPalette function
-        function initPalette(){
-            const p = document.getElementById('palette');
-            const mp = document.getElementById('mobilePalette');
-            p.innerHTML = '';
-            mp.innerHTML = '';
-            
-            Q.forEach((_, i) => {
-                const d = document.createElement('div');
-                d.className = 'q-num'; 
-                d.textContent = i + 1; 
-                d.onclick = () => {
-                    show(i);
-                    if (window.innerWidth <= 768) {
-                        toggleMobilePalette();
-                    }
-                };
-                p.appendChild(d);
-                
-                // Mobile palette
-                const md = d.cloneNode(true);
-                md.onclick = () => {
-                    show(i);
-                    toggleMobilePalette();
-                };
-                mp.appendChild(md);
-                
-                rev[i] = false; 
-                vis[i] = false; 
-                qTimes[i] = 0;
-            });
-            updateStats();
-        }
-        
-        // Update show function for mobile
-        function show(i){
-            // Existing show code... add this at the beginning:
-            document.getElementById('mobileQNum').textContent = i + 1;
-            
-            // Rest of existing show function...
-        }
-        
-        // Update startTest for mobile
-        function startTest(){
-            document.getElementById('start').style.display='none';
-            document.getElementById('header').style.display='flex';
-            document.getElementById('main').style.display='flex';
-            document.getElementById('qContainer').style.display='block';
-            document.getElementById('result').style.display='none';
-            
-            // Show appropriate navigation based on screen size
-            if (window.innerWidth <= 768) {
-                document.getElementById('mobileNav').style.display = 'flex';
-                document.getElementById('nav').style.display = 'none';
-            } else {
-                document.getElementById('nav').style.display = 'flex';
-                document.getElementById('mobileNav').style.display = 'none';
-            }
-            
-            if (document.getElementById('palette').children.length === 0) {
-                initPalette();
-            }
-            show(0);
-            if (!timerHandle) startTimer();
-        }
-        
-        // Handle window resize
-        window.addEventListener('resize', () => {
-            if (window.innerWidth <= 768) {
-                if (document.getElementById('main').style.display === 'flex') {
-                    document.getElementById('nav').style.display = 'none';
-                    document.getElementById('mobileNav').style.display = 'flex';
-                }
-            } else {
-                if (document.getElementById('main').style.display === 'flex') {
-                    document.getElementById('mobileNav').style.display = 'none';
-                    document.getElementById('nav').style.display = 'flex';
-                }
-            }
-        });
-        
-        // Escape key to close mobile palette
-        document.addEventListener('keydown', e => {
-            if (e.key === 'Escape') {
-                const overlay = document.getElementById('mobilePaletteOverlay');
-                if (overlay.style.display === 'flex') {
-                    toggleMobilePalette();
-                }
-            }
-        });
         """
 
     def process_html(self, html_content):
@@ -415,34 +324,26 @@ class HTMLQuizProcessor:
             html_content = html_content.replace('</body>', mobile_nav_html + '\n</body>')
         
         # 5. Add mobile CSS to the style section
-        if '<style>' in html_content:
-            # Insert mobile CSS before closing style tag
-            html_content = html_content.replace('</style>', self.mobile_css + '\n</style>')
+        css_end_pattern = r'</style>'
+        if re.search(css_end_pattern, html_content):
+            html_content = re.sub(css_end_pattern, self.mobile_css + '\n</style>', html_content)
         else:
             # Create style section if doesn't exist
             html_content = html_content.replace('</head>', '<style>' + self.mobile_css + '</style>\n</head>')
         
         # 6. Update JavaScript functions
-        # Add mobile palette div to HTML
-        palette_pattern = r'<div class="q-numbers" id="palette"></div>'
-        if palette_pattern in html_content:
-            html_content = html_content.replace(
-                palette_pattern,
-                '''<div class="q-numbers" id="palette"></div>
-                <div class="q-numbers" id="mobilePalette" style="display:none;"></div>'''
-            )
-        
-        # Find and update JavaScript
         js_pattern = r'<script>[\s\S]*?</script>'
         js_match = re.search(js_pattern, html_content, re.DOTALL)
         
         if js_match:
             original_js = js_match.group()
             
-            # Replace initPalette function
+            # Add mobile functions to JavaScript
+            original_js = original_js.replace('</script>', self.mobile_js_functions + '\n</script>')
+            
+            # Update initPalette function
             init_palette_pattern = r'function initPalette\(\)\{[\s\S]*?\n\}'
-            if re.search(init_palette_pattern, original_js):
-                new_init_palette = '''function initPalette(){
+            new_init_palette = '''function initPalette(){
     const p = document.getElementById('palette');
     const mp = document.getElementById('mobilePalette');
     p.innerHTML = '';
@@ -474,50 +375,58 @@ class HTMLQuizProcessor:
     });
     updateStats();
 }'''
-                original_js = re.sub(init_palette_pattern, new_init_palette, original_js)
             
-            # Add mobile functions to JavaScript
-            original_js = original_js.replace(
-                '</script>',
-                self.mobile_js_functions + '\n</script>'
-            )
+            if re.search(init_palette_pattern, original_js):
+                original_js = re.sub(init_palette_pattern, new_init_palette, original_js)
+            else:
+                # Add initPalette if not found
+                original_js = original_js.replace('const TIME = 3000;', 'const TIME = 3000;\n\n' + new_init_palette)
+            
+            # Add mobile palette div if not exists
+            if '<div class="q-numbers" id="palette"></div>' in html_content and 'id="mobilePalette"' not in html_content:
+                html_content = html_content.replace(
+                    '<div class="q-numbers" id="palette"></div>',
+                    '<div class="q-numbers" id="palette"></div>\n<div class="q-numbers" id="mobilePalette"></div>'
+                )
             
             # Update show function to include mobile Q number
             show_pattern = r'function show\(i\)\{'
             if show_pattern in original_js:
                 original_js = original_js.replace(
-                    show_pattern,
+                    'function show(i){',
                     '''function show(i){
     document.getElementById('mobileQNum').textContent = i + 1;'''
                 )
             
-            # Update startTest function
-            start_test_pattern = r'function startTest\(\)\{'
-            if start_test_pattern in original_js:
-                original_js = original_js.replace(
-                    start_test_pattern,
-                    '''function startTest(){
-    document.getElementById('start').style.display='none';
-    document.getElementById('header').style.display='flex';
-    document.getElementById('main').style.display='flex';
-    document.getElementById('qContainer').style.display='block';
-    document.getElementById('result').style.display='none';
-    
-    // Show appropriate navigation based on screen size
-    if (window.innerWidth <= 768) {
-        document.getElementById('mobileNav').style.display = 'flex';
-        document.getElementById('nav').style.display = 'none';
-    } else {
-        document.getElementById('nav').style.display = 'flex';
-        document.getElementById('mobileNav').style.display = 'none';
-    }
-    
-    if (document.getElementById('palette').children.length === 0) {
-        initPalette();
-    }
-    show(0);
-    if (!timerHandle) startTimer();'''
-                )
+            # Add window resize handler
+            resize_handler = '''
+            // Handle window resize
+            window.addEventListener('resize', () => {
+                if (window.innerWidth <= 768) {
+                    if (document.getElementById('main').style.display === 'flex') {
+                        document.getElementById('nav').style.display = 'none';
+                        document.getElementById('mobileNav').style.display = 'flex';
+                    }
+                } else {
+                    if (document.getElementById('main').style.display === 'flex') {
+                        document.getElementById('mobileNav').style.display = 'none';
+                        document.getElementById('nav').style.display = 'flex';
+                    }
+                }
+            });
+            
+            // Escape key to close mobile palette
+            document.addEventListener('keydown', e => {
+                if (e.key === 'Escape') {
+                    const overlay = document.getElementById('mobilePaletteOverlay');
+                    if (overlay.style.display === 'flex') {
+                        toggleMobilePalette();
+                    }
+                }
+            });
+            '''
+            
+            original_js = original_js.replace('</script>', resize_handler + '\n</script>')
             
             html_content = html_content.replace(js_match.group(), original_js)
         
@@ -571,12 +480,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📖 *Help Guide*
 
 *What I Do:*
-1. **Branding Update**: Change "Boss Quiz Robot" to "Nomis Test"
-2. **Link Update**: Update Telegram link to https://t.me/King_Nomis
-3. **Mobile Navigation**: Add bottom navigation bar for mobile
-4. **Question Display**: Show current question number on mobile
-5. **Palette Access**: Add overlay palette for mobile
-6. **Responsive Design**: Fix layout for all screen sizes
+1. *Branding Update*: Change "Boss Quiz Robot" to "Nomis Test"
+2. *Link Update*: Update Telegram link to https://t.me/King_Nomis
+3. *Mobile Navigation*: Add bottom navigation bar for mobile
+4. *Question Display*: Show current question number on mobile
+5. *Palette Access*: Add overlay palette for mobile
+6. *Responsive Design*: Fix layout for all screen sizes
 
 *Mobile Features Added:*
 • Bottom navigation bar
@@ -667,31 +576,28 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(processed_content)
         
-        # Send processed file
+        # Send processed file with plain text caption (no Markdown)
         with open(output_path, 'rb') as f:
             await update.message.reply_document(
                 document=f,
                 filename=output_filename,
-                caption=f"""
-✅ *File Processed Successfully!*
+                caption=f"""✅ File Processed Successfully!
 
-*Original:* {file_name}
-*Processed:* {output_filename}
-*Size:* {len(processed_content)} bytes
+Original: {file_name}
+Processed: {output_filename}
+Size: {len(processed_content)} bytes
 
-*Changes Made:*
+Changes Made:
 ✓ Updated to Nomis Test branding
 ✓ Added mobile navigation
 ✓ Fixed mobile display
 ✓ Improved responsive design
 ✓ Updated Telegram link
 
-Open in browser to see improvements!
-                """,
-                parse_mode='Markdown'
+Open in browser to see improvements!"""
             )
         
-        # Send preview of changes
+        # Send preview as separate message with Markdown
         preview_text = """
 📱 *Mobile Improvements Added:*
 
@@ -717,7 +623,7 @@ Open in browser to see improvements!
         
     except Exception as e:
         logger.error(f"Error processing file: {e}")
-        error_msg = await update.message.reply_text(f"❌ Error: {str(e)[:100]}...")
+        await update.message.reply_text(f"❌ Error: {str(e)[:100]}")
         
         try:
             import shutil
@@ -753,7 +659,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if update and update.message:
         error_text = """
-❌ *Oops! Something went wrong*
+❌ Oops! Something went wrong
 
 Please try:
 1. Send the file again
@@ -761,12 +667,12 @@ Please try:
 3. File size under 20MB
 4. Contact @King_Nomis if issue persists
 
-*Common issues:*
+Common issues:
 • Corrupted HTML file
 • File too large
 • Network timeout
         """
-        await update.message.reply_text(error_text, parse_mode='Markdown')
+        await update.message.reply_text(error_text)
 
 def main():
     """Start the bot"""
@@ -793,4 +699,11 @@ def main():
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
-    main()
+    # For local testing without Telegram
+    if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
+        print("⚠️  Please replace BOT_TOKEN with your actual bot token!")
+        print("1. Open Telegram and search for @BotFather")
+        print("2. Create a new bot with /newbot")
+        print("3. Copy the token and paste it in the code")
+    else:
+        main()
