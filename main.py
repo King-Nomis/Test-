@@ -21,14 +21,11 @@ class HTMLProcessor:
         Process HTML content and apply the Nomis UI modifications with JEE Main scoring.
         """
         try:
-            # Apply JEE Main scoring logic to the JavaScript
-            processed_html = HTMLProcessor.apply_jee_scoring(html_content)
-            
-            # Replace brand name and link
+            # First apply brand changes
             processed_html = re.sub(
                 r'<a[^>]*href="[^"]*"[^>]*>.*?Boss_Quiz_Robot.*?</a>',
                 f'<a class="brand" href="{telegram_link}" target="_blank" rel="noopener">{brand_name}</a>',
-                processed_html,
+                html_content,
                 flags=re.DOTALL | re.IGNORECASE
             )
             
@@ -40,6 +37,12 @@ class HTMLProcessor:
                 flags=re.IGNORECASE
             )
             
+            # Apply JEE Main scoring logic
+            processed_html = HTMLProcessor.apply_jee_scoring(processed_html)
+            
+            # Fix the start button onclick issue
+            processed_html = HTMLProcessor.fix_start_button(processed_html)
+            
             # Apply Nomis UI styles
             processed_html = HTMLProcessor.apply_nomis_styles(processed_html)
             
@@ -50,12 +53,48 @@ class HTMLProcessor:
             return None
     
     @staticmethod
+    def fix_start_button(html_content: str) -> str:
+        """
+        Fix the start button onclick function call.
+        """
+        # Fix the start button onclick
+        html_content = re.sub(
+            r'<button[^>]*class="[^"]*start-btn[^"]*"[^>]*onclick="startTest\(\)"[^>]*>',
+            '<button class="start-btn" onclick="startTest()">',
+            html_content,
+            flags=re.IGNORECASE
+        )
+        
+        # Make sure the startTest function exists
+        if 'function startTest()' not in html_content:
+            # Add the startTest function if missing
+            start_test_js = """
+function startTest(){
+  document.getElementById('start').style.display='none';
+  document.getElementById('header').style.display='flex';
+  document.getElementById('main').style.display='flex';
+  document.getElementById('qContainer').style.display='block';
+  document.getElementById('result').style.display='none';
+  document.getElementById('nav').style.display='flex';
+  if (document.getElementById('palette').children.length === 0) {
+    initPalette();
+  }
+  show(0);
+  if (!timerHandle) startTimer();
+}
+"""
+            # Insert before the closing script tag
+            html_content = html_content.replace('</script>', start_test_js + '\n</script>')
+        
+        return html_content
+    
+    @staticmethod
     def apply_jee_scoring(html_content: str) -> str:
         """
         Apply JEE Main scoring system to the quiz.
         JEE Main: +4 for correct, -1 for wrong, 0 for unanswered
         """
-        # Find the submit function
+        # Find and fix the submit function
         submit_function_pattern = r'function submit\([^)]*\)\s*\{[^}]*\}'
         
         jee_scoring_code = """
@@ -156,7 +195,9 @@ function submit(auto=false){
         """
         Apply the Nomis UI styles to the HTML content.
         """
-        # Same CSS as before, but add JEE scoring highlights
+        # Find and replace the CSS
+        style_pattern = r'<style[^>]*>.*?</style>'
+        
         nomis_css = """
         <style>
         :root {
@@ -170,22 +211,6 @@ function submit(auto=false){
           --bg:#121826; --bg2:#1a2236; --card:#1f2937; --text:#e2e8f0; --muted:#94a3b8; --border:#374151; --opt:#2d3748; --optH:#374151;
           --correct:#10b981; --wrong:#ef4444; --unanswered:#6b7280;
         }
-        
-        /* JEE Scoring Highlights */
-        .jee-score-highlight {
-          background: linear-gradient(135deg, #3a86ff, #00bbf9);
-          color: white;
-          padding: 15px;
-          border-radius: 10px;
-          margin: 15px 0;
-          text-align: center;
-          font-weight: bold;
-          border: 2px solid #3a86ff;
-        }
-        
-        .jee-positive { color: var(--correct); font-weight: bold; }
-        .jee-negative { color: var(--wrong); font-weight: bold; }
-        .jee-neutral { color: var(--unanswered); }
         
         *{box-sizing:border-box;margin:0;padding:0}
         body{font-family:'Segoe UI', system-ui, -apple-system, sans-serif;background:var(--bg);color:var(--text);line-height:1.5;padding:16px;min-height:100vh}
@@ -251,33 +276,6 @@ function submit(auto=false){
         @media(min-width:768px){.metrics{grid-template-columns:repeat(3,1fr)}}
         .metric{background:var(--card);padding:16px;border-radius:8px;box-shadow:var(--shadow)}
         .metric .metric-value{font-size:20px;font-weight:700;color:var(--primary);margin-bottom:4px}
-        
-        /* JEE Score Card */
-        .jee-score-card {
-          background: linear-gradient(135deg, #f8fafc, #e2e8f0);
-          border-radius: 12px;
-          padding: 20px;
-          margin: 20px 0;
-          border: 2px solid var(--primary);
-        }
-        
-        .jee-score-row {
-          display: flex;
-          justify-content: space-between;
-          margin: 10px 0;
-          padding: 8px 0;
-          border-bottom: 1px solid var(--border);
-        }
-        
-        .jee-score-label {
-          font-weight: 600;
-          color: var(--muted);
-        }
-        
-        .jee-score-value {
-          font-weight: 700;
-          color: var(--primary);
-        }
 
         @media(max-width:768px){
           .container{flex-direction:column;margin-top:100px}
@@ -288,9 +286,6 @@ function submit(auto=false){
         }
         </style>
         """
-        
-        # Find and replace the CSS
-        style_pattern = r'<style[^>]*>.*?</style>'
         
         if re.search(style_pattern, html_content, re.DOTALL | re.IGNORECASE):
             # Replace existing style with Nomis style
@@ -322,6 +317,203 @@ function submit(auto=false){
             html_content
         )
         
+        # Ensure all JavaScript functions are properly defined
+        html_content = HTMLProcessor.ensure_javascript_functions(html_content)
+        
+        return html_content
+    
+    @staticmethod
+    def ensure_javascript_functions(html_content: str) -> str:
+        """
+        Ensure all necessary JavaScript functions are defined.
+        """
+        # Common JavaScript functions needed
+        common_js = """
+function pad(n){ return String(n).padStart(2,'0'); }
+
+function initPalette(){
+  const p = document.getElementById('palette');
+  p.innerHTML = '';
+  Q.forEach((_, i) => {
+    const d = document.createElement('div');
+    d.className = 'q-num'; d.textContent = i + 1; d.onclick = () => show(i);
+    p.appendChild(d); rev[i] = false; vis[i] = false; qTimes[i] = 0;
+  });
+  updateStats();
+}
+
+function updatePalette(){
+  document.querySelectorAll('.q-num').forEach((n, i) => {
+    n.classList.remove('viewed','answered','reviewed','current');
+    if (i === curr) n.classList.add('current');
+    if (rev[i]) n.classList.add('reviewed');
+    else if (ans[i]) n.classList.add('answered');
+    else if (vis[i]) n.classList.add('viewed');
+  });
+}
+
+function updateStats(){
+  const a = Object.keys(ans).length;
+  document.getElementById('ans').textContent = a;
+  document.getElementById('notAns').textContent = Q.length - a;
+  document.getElementById('notVis').textContent = vis.filter(v => !v).length;
+  document.getElementById('rev').textContent = rev.filter(Boolean).length;
+}
+
+function mark(){ if (!done) { rev[curr] = !rev[curr]; updatePalette(); updateStats(); updateNav(); } }
+function prev(){ if (curr > 0) show(curr - 1); }
+function next(){ if (curr < Q.length - 1) show(curr + 1); }
+
+function startTimer(){
+  if (timerHandle) return;
+  timerHandle = setInterval(() => {
+    if (!reviewMode && qStart) {
+      const e = Math.floor((Date.now() - qStart) / 1000);
+      document.getElementById('qTimer').textContent = `Time: ${pad(Math.floor(e/60))}:${pad(e%60)}`;
+    }
+    const m = Math.floor(time / 60); const s = time % 60;
+    document.getElementById('timer').textContent = `${pad(m)}:${pad(s)}`;
+    if (time <= 300) document.getElementById('timer').classList.add('warning');
+    if (time > 0) time--; else { stopAll(); alert('Time up!'); submit(true); }
+  }, 1000);
+}
+
+function stopAll(){ if (timerHandle) { clearInterval(timerHandle); timerHandle = null; } qStart = null; }
+
+function review(){
+  reviewMode = true;
+  document.getElementById('result').style.display = 'none';
+  document.getElementById('qContainer').style.display = 'block';
+  document.getElementById('nav').style.display = 'flex';
+  show(curr = 0);
+}
+
+function show(i){
+  if (qStart !== null && !reviewMode) qTimes[curr] += Math.floor((Date.now() - qStart) / 1000);
+  if (done && !reviewMode) return;
+  vis[i] = true; curr = i; const q = Q[i];
+  document.getElementById('qNum').textContent = `Question ${i+1} of ${Q.length}`;
+  document.getElementById('marks').textContent = q.marks;
+  document.getElementById('qText').innerHTML = q.question;
+
+  const opts = document.getElementById('options'); opts.innerHTML = '';
+  document.getElementById('solutionSlot').innerHTML = '';
+
+  if (reviewMode) {
+    const t = qTimes[i];
+    document.getElementById('qTimer').textContent = `Time: ${pad(Math.floor(t/60))}:${pad(t%60)}`;
+    q.options.forEach((o, j) => {
+      const li = document.createElement('li'); li.className = 'option';
+      const letter = String.fromCharCode(65 + j);
+      li.innerHTML = `${letter}. ` + o;
+      const isCorrect = (j + 1) === q.correct;
+      const isUser = ans[i] === (j + 1);
+      if (isUser && isCorrect) li.classList.add('correct');
+      else if (isUser) li.classList.add('wrong');
+      else if (isCorrect) li.classList.add('correct');
+      opts.appendChild(li);
+    });
+
+    const slot = document.getElementById('solutionSlot');
+    const sol = document.createElement('div');
+    sol.className = 'solution-wrap';
+    sol.style.marginTop = '14px';
+    const body = (Q[i].explanation || '');
+    sol.innerHTML = `
+      <details style="background:var(--opt);border:1px solid var(--border);border-radius:8px;padding:12px;">
+        <summary style="cursor:pointer;font-weight:600;color:var(--primary)">View Solution</summary>
+        <div style="margin-top:10px" class="solution-body">${body}</div>
+      </details>
+    `;
+    slot.appendChild(sol);
+    sol.querySelectorAll && sol.querySelectorAll('img').forEach(img => { img.style.maxWidth = '100%'; img.style.height = 'auto'; });
+    const det = sol.querySelector('details');
+    if (ans[i] && ans[i] !== q.correct) det.setAttribute('open','open');
+
+    document.getElementById('nav').style.display = 'flex';
+    document.getElementById('markBtn').disabled = true;
+    document.getElementById('prevBtn').disabled = (curr === 0);
+    document.getElementById('nextBtn').disabled = (curr === Q.length - 1);
+  } else {
+    document.getElementById('qTimer').textContent = 'Time: 00:00';
+    q.options.forEach((o, j) => {
+      const li = document.createElement('li'); li.className = 'option';
+      const letter = String.fromCharCode(65 + j);
+      const inp = document.createElement('input');
+      inp.type = 'radio'; inp.name = 'answer'; inp.value = j + 1; inp.id = `o${i}-${j}`;
+      if (ans[i] === (j + 1)) { inp.checked = true; li.classList.add('selected'); }
+      inp.onchange = () => {
+        ans[i] = parseInt(inp.value); updatePalette(); updateStats();
+        document.querySelectorAll('#options .option').forEach(x => x.classList.remove('selected'));
+        li.classList.add('selected');
+      };
+      const lbl = document.createElement('label'); lbl.htmlFor = inp.id; lbl.innerHTML = `${letter}. ` + o;
+      li.appendChild(inp); li.appendChild(lbl);
+      li.onclick = e => { if (e.target.tagName !== 'INPUT') { inp.checked = true; inp.onchange(); } };
+      opts.appendChild(li);
+    });
+    document.getElementById('markBtn').disabled = false;
+    document.getElementById('nav').style.display = 'flex';
+    qStart = Date.now();
+  }
+  updatePalette(); updateStats(); updateNav();
+  if (window.MathJax) MathJax.typeset([document.getElementById('qText'), document.getElementById('options'), document.getElementById('solutionSlot')]);
+}
+
+function updateNav(){
+  const atEnd = curr === Q.length - 1;
+  document.getElementById('prevBtn').disabled = curr === 0 && !reviewMode;
+  document.getElementById('nextBtn').disabled = atEnd;
+}
+
+// Global variables
+let time = TIME, curr = 0, ans = {}, rev = [], vis = [], qTimes = [], qStart = null;
+let done = false, reviewMode = false, timerHandle = null;
+
+// Theme toggle
+function toggleTheme(){
+  document.body.classList.toggle('dark-mode');
+  const isDark = document.body.classList.contains('dark-mode');
+  document.getElementById('themeBtn').textContent = isDark ? '☀️ Light' : '🌙 Dark';
+  localStorage.setItem('theme', isDark ? 'dark' : 'light');
+}
+
+// Initialize theme on load
+window.addEventListener('DOMContentLoaded', () => {
+  const savedTheme = localStorage.getItem('theme');
+  if (savedTheme === 'dark') {
+    document.body.classList.add('dark-mode');
+    const btn = document.getElementById('themeBtn');
+    if (btn) btn.textContent = '☀️ Light';
+  }
+});
+
+// Keyboard shortcuts
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft') prev();
+  else if (e.key === 'ArrowRight') next();
+  else if (e.key === 'm' || e.key === 'M') mark();
+  else if (e.key >= '1' && e.key <= '4') {
+    const idx = parseInt(e.key) - 1;
+    const inputs = document.querySelectorAll('input[type="radio"]');
+    if (inputs[idx]) {
+      inputs[idx].checked = true;
+      inputs[idx].onchange();
+    }
+  }
+});
+"""
+        
+        # Insert the JavaScript before closing body tag
+        body_close_pattern = r'</body>'
+        if re.search(body_close_pattern, html_content, re.IGNORECASE):
+            html_content = re.sub(
+                body_close_pattern,
+                f'<script>\n{common_js}\n</script>\n</body>',
+                html_content,
+                flags=re.IGNORECASE
+            )
+        
         return html_content
 
 
@@ -345,6 +537,7 @@ class TelegramBot:
             'Send me an HTML quiz file and I\'ll convert it with:\n'
             '• JEE Main Scoring (+4/-1)\n'
             '• Nomis UI Design\n'
+            '• All buttons fixed and working\n'
             '• Percentile Estimation\n\n'
             'Commands:\n'
             '/html - Process HTML file\n'
@@ -355,8 +548,13 @@ class TelegramBot:
         """Send a message when the command /help is issued."""
         help_text = (
             "🎯 *Nomis HTML Processor Bot with JEE Main Scoring*\n\n"
-            "I convert quiz HTML files to JEE Main format with Nomis UI.\n\n"
-            "*JEE Main Scoring System:*\n"
+            "I convert quiz HTML files to JEE Main format with fully functional Nomis UI.\n\n"
+            "*Fixed Issues:*\n"
+            "• ✅ Start Test button now works\n"
+            "• ✅ All navigation buttons functional\n"
+            "• ✅ Keyboard shortcuts work\n"
+            "• ✅ Theme toggle works\n\n"
+            "*JEE Main Scoring:*\n"
             "• ✅ Correct Answer: +4 marks\n"
             "• ❌ Wrong Answer: -1 mark\n"
             "• 🔘 Unanswered: 0 marks\n\n"
@@ -364,11 +562,6 @@ class TelegramBot:
             "1. Send me an HTML file\n"
             "2. I'll process it with JEE scoring\n"
             "3. Get back the updated version\n\n"
-            "*Features:*\n"
-            "• JEE Main (+4/-1) scoring system\n"
-            "• Percentile estimation\n"
-            "• Nomis modern UI\n"
-            "• Custom branding support\n\n"
             "*Commands:*\n"
             "/start - Start the bot\n"
             "/html [brand] [link] - Process with custom brand\n"
@@ -380,10 +573,12 @@ class TelegramBot:
         """Handle the /html command."""
         await update.message.reply_text(
             "📁 Send me an HTML quiz file to convert to JEE Main format.\n\n"
-            "*JEE Main Scoring will be applied:*\n"
-            "✅ Correct: +4 marks\n"
-            "❌ Wrong: -1 mark\n"
-            "🔘 Unanswered: 0 marks\n\n"
+            "*All buttons will be fixed and working:*\n"
+            "✅ Start Test button\n"
+            "✅ Previous/Next buttons\n"
+            "✅ Mark for review\n"
+            "✅ Submit button\n"
+            "✅ Theme toggle\n\n"
             "Custom brand: /html BrandName https://telegram.link"
         )
         
@@ -411,7 +606,7 @@ class TelegramBot:
             )
             return
         
-        await update.message.reply_text("📥 Processing your HTML file with JEE Main scoring...")
+        await update.message.reply_text("📥 Processing your HTML file with JEE Main scoring...\n\n✅ Fixing all buttons...")
         
         try:
             # Download the file
@@ -429,7 +624,7 @@ class TelegramBot:
                 brand_name = context.user_data.get('custom_brand', 'Nomis Quiz')
                 telegram_link = context.user_data.get('custom_link', 'https://t.me/King_Nomis')
                 
-                # Process HTML with JEE scoring
+                # Process HTML with JEE scoring and button fixes
                 processed_html = HTMLProcessor.process_html(
                     html_content, 
                     brand_name=brand_name,
@@ -438,7 +633,7 @@ class TelegramBot:
                 
                 if processed_html:
                     # Save processed HTML
-                    processed_filename = f"JEE_{document.file_name}"
+                    processed_filename = f"JEE_FIXED_{document.file_name}"
                     processed_path = tmp_file.name + "_processed.html"
                     
                     with open(processed_path, 'w', encoding='utf-8') as f:
@@ -449,11 +644,12 @@ class TelegramBot:
                         await update.message.reply_document(
                             document=f,
                             filename=processed_filename,
-                            caption="✅ HTML processed with JEE Main scoring!\n\n"
+                            caption="✅ HTML processed successfully!\n\n"
                                    f"🏷️ Brand: {brand_name}\n"
                                    f"🔗 Link: {telegram_link}\n"
                                    f"📊 Scoring: +4/-1 (JEE Main pattern)\n"
-                                   f"🎨 UI: Nomis Modern Design"
+                                   f"🎨 UI: Nomis Modern Design\n"
+                                   f"🔧 All buttons fixed and working"
                         )
                     
                     # Clean up
@@ -477,7 +673,6 @@ class TelegramBot:
         text = update.message.text
         
         if text:
-            # If user sends HTML content directly
             if '<html' in text.lower() or '<!doctype' in text.lower():
                 await update.message.reply_text(
                     "It looks like you sent HTML content. "
@@ -486,6 +681,7 @@ class TelegramBot:
             else:
                 await update.message.reply_text(
                     "Send me an HTML quiz file to convert to JEE Main format!\n"
+                    "All buttons will be fixed and working.\n"
                     "Use /help for more information."
                 )
     
@@ -505,7 +701,8 @@ def main():
     # Create and run bot
     bot = TelegramBot(TOKEN)
     print("Bot is running with JEE Main scoring...")
-    print("Scoring System: +4 for correct, -1 for wrong")
+    print("Fixed: Start Test button and all navigation")
+    print("Scoring: +4 for correct, -1 for wrong")
     bot.run()
 
 
